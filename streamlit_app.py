@@ -1,8 +1,27 @@
 import streamlit as st
 from openai import OpenAI
+import PyPDF2  # best for simple text doc like the one we are going to use here
+
+
+def extract_text_from_pdf(uploaded_file):
+    reader = PyPDF2.PdfReader(uploaded_file)
+    text = ''
+    for page in reader.pages:
+        page_text = page.extract_text()
+        if page_text:
+            text += page_text
+    return text
+
+def extract_text_from_txt(uploaded_file):
+    """Extract text from a .txt file uploaded via Streamlit."""
+    try:
+        return uploaded_file.read().decode("utf-8")
+    except UnicodeDecodeError:
+        # fallback encoding
+        return uploaded_file.read().decode("latin-1")
 
 # Show title and description.
-st.title("📄 Document question answering")
+st.title("📄 HW1: Document question answering")
 st.write(
     "Upload a document below and ask a question about it – GPT will answer! "
     "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
@@ -20,34 +39,48 @@ else:
     client = OpenAI(api_key=openai_api_key)
 
     # Let the user upload a file via `st.file_uploader`.
-    uploaded_file = st.file_uploader(
-        "Upload a document (.txt or .md)", type=("txt", "md")
-    )
+    uploaded_file = st.file_uploader("Upload a document (.txt or .pdf)", type=("txt", "pdf"))
+
+    document = None  # if file removed, delete it from memory
+
+    if uploaded_file is not None:
+        file_extension = uploaded_file.name.split('.')[-1].lower()
+        if file_extension == "txt":
+            document = extract_text_from_txt(uploaded_file)
+        elif file_extension == "pdf":
+            document = extract_text_from_pdf(uploaded_file)
+        else:
+            st.error("Unsupported file type.")
 
     # Ask the user for a question via `st.text_area`.
     question = st.text_area(
         "Now ask a question about the document!",
-        placeholder="Can you give me a short summary?",
+        placeholder="Is the course hard?",
         disabled=not uploaded_file,
     )
 
-    if uploaded_file and question:
-
-        # Process the uploaded file and question.
-        document = uploaded_file.read().decode()
-        messages = [
-            {
-                "role": "user",
-                "content": f"Here's a document: {document} \n\n---\n\n {question}",
-            }
+    if document and question:
+        models = [
+            "gpt-3.5-turbo",
+            "gpt-4.1",
+            "gpt-5-chat-latest",
+            "gpt-5-nano"
         ]
 
-        # Generate an answer using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=messages,
-            stream=True,
-        )
-
-        # Stream the response to the app using `st.write_stream`.
-        st.write_stream(stream)
+        for model in models:
+            with st.expander(f"Answer using {model}", expanded=True):
+                messages = [
+                    {
+                        "role": "user",
+                        "content": f"Here's a document: {document}\n\n---\n\n{question}",
+                    }
+                ]
+                try:
+                    stream = client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        stream=True,
+                    )
+                    st.write_stream(stream)
+                except Exception as e:
+                    st.error(f"Error with {model}: {e}")
